@@ -1,12 +1,13 @@
 const state = {
   mode: "create",
   roomId: new URLSearchParams(location.search).get("room") || "",
+  roomKey: new URLSearchParams(location.search).get("key") || "",
   memberId: localStorage.getItem("circlewatch.memberId") || crypto.randomUUID(),
   color: localStorage.getItem("circlewatch.color") || "#2563eb",
   status: "safe",
   sharing: false,
   watchId: null,
-  lastLocation: null,
+  lastLocation: JSON.parse(localStorage.getItem("circlewatch.lastLocation") || "null"),
   source: null,
   markers: new Map()
 };
@@ -26,10 +27,13 @@ const els = {
   roomName: document.querySelector("#roomName"),
   inviteCode: document.querySelector("#inviteCode"),
   copyInviteBtn: document.querySelector("#copyInviteBtn"),
+  systemShareBtn: document.querySelector("#systemShareBtn"),
+  whatsappInvite: document.querySelector("#whatsappInvite"),
   memberName: document.querySelector("#memberName"),
   message: document.querySelector("#message"),
   shareToggle: document.querySelector("#shareToggle"),
   checkInBtn: document.querySelector("#checkInBtn"),
+  hideLocationBtn: document.querySelector("#hideLocationBtn"),
   smsInvite: document.querySelector("#smsInvite"),
   membersList: document.querySelector("#membersList"),
   memberCount: document.querySelector("#memberCount"),
@@ -55,7 +59,11 @@ function toast(message) {
 }
 
 function api(path, options = {}) {
-  return fetch(path, {
+  const separator = path.includes("?") ? "&" : "?";
+  const securedPath = state.roomKey && path.startsWith("/api/rooms/")
+    ? `${path}${separator}key=${encodeURIComponent(state.roomKey)}`
+    : path;
+  return fetch(securedPath, {
     ...options,
     headers: {
       "content-type": "application/json",
@@ -78,18 +86,24 @@ function setMode(mode) {
 }
 
 function inviteUrl() {
-  return `${location.origin}${location.pathname}?room=${state.roomId}`;
+  return `${location.origin}${location.pathname}?room=${state.roomId}&key=${encodeURIComponent(state.roomKey)}`;
 }
 
-function showApp(room) {
+function inviteText() {
+  return `Join my private CircleWatch family safety circle: ${inviteUrl()}`;
+}
+
+function showApp(room, key = state.roomKey) {
   state.roomId = room.id;
-  history.replaceState(null, "", `?room=${room.id}`);
+  state.roomKey = key;
+  history.replaceState(null, "", `?room=${room.id}&key=${encodeURIComponent(state.roomKey)}`);
   els.setupPanel.classList.add("hidden");
   els.profilePanel.classList.remove("hidden");
   els.membersPanel.classList.remove("hidden");
   els.roomName.textContent = room.name;
-  els.inviteCode.textContent = room.id;
-  els.smsInvite.href = `sms:?&body=${encodeURIComponent(`Join my CircleWatch family safety circle: ${inviteUrl()}`)}`;
+  els.inviteCode.textContent = `${room.id}...`;
+  els.smsInvite.href = `sms:?&body=${encodeURIComponent(inviteText())}`;
+  els.whatsappInvite.href = `https://wa.me/?text=${encodeURIComponent(inviteText())}`;
   els.mapTitle.textContent = room.name;
   els.mapSubtitle.textContent = "Waiting for live check-ins";
   connectEvents();
@@ -114,6 +128,10 @@ function timeAgo(ms) {
   return `${Math.round(minutes / 60)}h ago`;
 }
 
+function directionsUrl(locationPoint) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${locationPoint.lat},${locationPoint.lng}`;
+}
+
 function renderRoom(room) {
   const members = room.members.slice().sort((a, b) => b.lastSeen - a.lastSeen);
   els.memberCount.textContent = String(members.length);
@@ -125,10 +143,13 @@ function renderRoom(room) {
     card.innerHTML = `
       <div class="member-main">
         <div class="member-name"><span class="dot" style="--dot:${member.color}"></span><span>${escapeHtml(member.name)}</span></div>
-        <div class="member-meta">${member.location ? `${timeAgo(member.location.updatedAt)} · ${Math.round(member.location.accuracy || 0)}m accuracy` : "Location paused"}</div>
+        <div class="member-meta">${member.location ? `${member.location.live ? "Live" : "Last known"} · ${timeAgo(member.location.updatedAt)} · ${Math.round(member.location.accuracy || 0)}m accuracy` : "Location hidden"}</div>
         ${member.message ? `<div class="member-message">${escapeHtml(member.message)}</div>` : ""}
       </div>
-      <span class="badge ${member.status}">${member.status.toUpperCase()}</span>
+      <div class="member-actions">
+        <span class="badge ${member.status}">${member.status.toUpperCase()}</span>
+        ${member.location ? `<a class="directions-link" target="_blank" rel="noreferrer" href="${directionsUrl(member.location)}">Directions</a>` : ""}
+      </div>
     `;
     els.membersList.appendChild(card);
   }
@@ -140,7 +161,7 @@ function renderRoom(room) {
     seen.add(member.id);
     const latLng = [member.location.lat, member.location.lng];
     bounds.push(latLng);
-    const popup = `<strong>${escapeHtml(member.name)}</strong><br>${member.status.toUpperCase()} · ${timeAgo(member.location.updatedAt)}${member.message ? `<br>${escapeHtml(member.message)}` : ""}`;
+    const popup = `<strong>${escapeHtml(member.name)}</strong><br>${member.location.live ? "LIVE" : "LAST KNOWN"} · ${member.status.toUpperCase()} · ${timeAgo(member.location.updatedAt)}${member.message ? `<br>${escapeHtml(member.message)}` : ""}<br><a class="directions-link" target="_blank" rel="noreferrer" href="${directionsUrl(member.location)}">Open Google Maps directions</a>`;
     if (!state.markers.has(member.id)) {
       state.markers.set(member.id, L.marker(latLng, { icon: markerIcon(member) }).addTo(map));
     }
@@ -156,7 +177,7 @@ function renderRoom(room) {
 
   if (bounds.length) {
     map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
-    els.mapSubtitle.textContent = `${bounds.length} live location${bounds.length === 1 ? "" : "s"} visible`;
+    els.mapSubtitle.textContent = `${bounds.length} live or last known location${bounds.length === 1 ? "" : "s"} visible`;
   }
 }
 
@@ -172,7 +193,7 @@ function escapeHtml(value) {
 
 function connectEvents() {
   if (state.source) state.source.close();
-  state.source = new EventSource(`/api/rooms/${state.roomId}/events`);
+  state.source = new EventSource(`/api/rooms/${state.roomId}/events?key=${encodeURIComponent(state.roomKey)}`);
   state.source.onmessage = event => {
     const data = JSON.parse(event.data);
     if (data.type === "room") renderRoom(data.room);
@@ -196,8 +217,33 @@ async function publishMember() {
       status: state.status,
       message: els.message.value,
       battery,
-      consent: state.sharing,
+      consent: Boolean(state.lastLocation),
+      liveSharing: state.sharing,
+      keepLastLocation: true,
       location: state.lastLocation
+    })
+  });
+}
+
+async function hideLocation() {
+  state.sharing = false;
+  if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
+  state.watchId = null;
+  state.lastLocation = null;
+  localStorage.removeItem("circlewatch.lastLocation");
+  els.shareToggle.setAttribute("aria-pressed", "false");
+  const name = els.memberName.value.trim() || "Loved one";
+  await api(`/api/rooms/${state.roomId}/members`, {
+    method: "POST",
+    body: JSON.stringify({
+      id: state.memberId,
+      name,
+      color: state.color,
+      status: state.status,
+      message: els.message.value,
+      consent: false,
+      liveSharing: false,
+      hideLocation: true
     })
   });
 }
@@ -214,7 +260,6 @@ function setSharing(enabled) {
   if (!enabled) {
     if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
     state.watchId = null;
-    state.lastLocation = null;
     publishMember().catch(err => toast(err.message));
     return;
   }
@@ -226,6 +271,7 @@ function setSharing(enabled) {
       accuracy: position.coords.accuracy,
       speed: position.coords.speed || 0
     };
+    localStorage.setItem("circlewatch.lastLocation", JSON.stringify(state.lastLocation));
     publishMember().catch(err => toast(err.message));
   }, error => {
     setSharing(false);
@@ -243,18 +289,20 @@ els.joinTab.addEventListener("click", () => setMode("join"));
 els.setupBtn.addEventListener("click", async () => {
   try {
     if (state.mode === "create") {
-      const { room } = await api("/api/rooms", {
+      const created = await api("/api/rooms", {
         method: "POST",
         body: JSON.stringify({ name: els.circleName.value })
       });
-      showApp(room);
-      toast("Circle created. Share the invite link.");
+      showApp(created.room, created.key);
+      toast("Private circle created. Share the invite link.");
       return;
     }
-    const code = els.joinCode.value.trim().toLowerCase();
-    const { room } = await api(`/api/rooms/${code}`);
-    showApp(room);
-    toast("Joined circle.");
+    const invite = parseInvite(els.joinCode.value);
+    if (!invite.room || !invite.key) throw new Error("Paste the full private invite link.");
+    state.roomKey = invite.key;
+    const { room } = await api(`/api/rooms/${invite.room}`);
+    showApp(room, invite.key);
+    toast("Joined private circle.");
   } catch (err) {
     toast(err.message);
   }
@@ -265,8 +313,32 @@ els.copyInviteBtn.addEventListener("click", async () => {
   toast("Invite link copied.");
 });
 
+els.systemShareBtn.addEventListener("click", async () => {
+  if (navigator.share) {
+    await navigator.share({ title: "CircleWatch invite", text: "Join my private family safety circle.", url: inviteUrl() });
+    return;
+  }
+  await navigator.clipboard.writeText(inviteUrl());
+  toast("Invite link copied.");
+});
+
 els.shareToggle.addEventListener("click", () => setSharing(!state.sharing));
 els.checkInBtn.addEventListener("click", () => publishMember().then(() => toast("Checked in.")).catch(err => toast(err.message)));
+els.hideLocationBtn.addEventListener("click", () => hideLocation().then(() => toast("Your location is hidden.")).catch(err => toast(err.message)));
+
+function parseInvite(value) {
+  const raw = value.trim();
+  try {
+    const parsed = new URL(raw);
+    return {
+      room: parsed.searchParams.get("room") || "",
+      key: parsed.searchParams.get("key") || ""
+    };
+  } catch {
+    const [room, key = ""] = raw.split(":");
+    return { room: room.toLowerCase(), key };
+  }
+}
 
 document.querySelectorAll(".swatch").forEach(button => {
   button.classList.toggle("active", button.dataset.color === state.color);

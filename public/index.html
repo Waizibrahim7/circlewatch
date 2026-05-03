@@ -28,8 +28,8 @@
             <input id="circleName" maxlength="60" autocomplete="off" value="My Family">
           </label>
           <label id="joinCodeWrap" class="hidden">
-            Invite code
-            <input id="joinCode" maxlength="20" autocomplete="off" placeholder="Paste code">
+            Private invite link
+            <input id="joinCode" maxlength="220" autocomplete="off" placeholder="Paste invite link or code">
           </label>
           <button class="primary-btn" id="setupBtn" type="button">Create circle</button>
         </div>
@@ -41,6 +41,11 @@
               <strong id="inviteCode">--</strong>
             </div>
             <button class="icon-btn" id="copyInviteBtn" title="Copy invite link" type="button">Copy</button>
+          </div>
+          <div class="share-grid">
+            <button class="icon-btn" id="systemShareBtn" type="button">Share</button>
+            <a class="share-btn" id="whatsappInvite" target="_blank" rel="noreferrer">WhatsApp</a>
+            <a class="share-btn" id="smsInvite" href="#">SMS</a>
           </div>
 
           <label>
@@ -70,13 +75,14 @@
           <div class="toggle-row">
             <div>
               <strong>Live sharing</strong>
-              <span>Uses this device's browser location.</span>
+              <span>When paused, your last known location stays visible for emergencies.</span>
             </div>
             <button class="switch" id="shareToggle" aria-pressed="false" type="button"><span></span></button>
           </div>
 
           <button class="primary-btn" id="checkInBtn" type="button">Check in now</button>
-          <a class="sms-link" id="smsInvite" href="#">Send invite by SMS</a>
+          <button class="ghost-btn" id="hideLocationBtn" type="button">Hide my location</button>
+          <div class="security-note">Private invite links include a secret key. Only share them with trusted family members.</div>
         </div>
 
         <div class="panel members-panel hidden" id="membersPanel">

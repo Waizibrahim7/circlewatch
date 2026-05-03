@@ -4,6 +4,16 @@ CircleWatch is a consent-based family safety web app. A family member creates a 
 
 It does not track people from a phone number, call, or SMS. SMS is only used to send an invite link.
 
+## Features
+
+- Private invite links with a room id and secret key.
+- Live location sharing from each member's own browser.
+- Last known location remains visible for emergencies when live sharing pauses.
+- Google Maps directions to a member's live or last known location.
+- Copy, native share, WhatsApp, and SMS invite options.
+- SOS, Safe, and Moving status buttons.
+- Hide my location control for consent and privacy.
+
 ## Run locally
 
 ```bash
@@ -30,6 +40,8 @@ This app can be deployed to a Node host such as Render, Railway, Fly.io, or a VP
 ## Privacy notes
 
 - Location sharing requires browser geolocation permission.
-- Turning off Live sharing removes that user's current location from the map.
-- Empty rooms expire automatically after 12 hours.
+- Turning off Live sharing keeps the user's last known location visible for family emergencies.
+- "Hide my location" removes that user's location from the map.
+- Member records expire automatically after 24 hours of inactivity.
+- Empty rooms expire automatically after 7 days.
 - Do not use this app to track anyone without clear consent.

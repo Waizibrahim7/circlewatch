@@ -11,6 +11,8 @@ const PUBLIC_DIR = fs.existsSync(path.join(preferredPublicDir, "index.html"))
   : __dirname;
 const rooms = new Map();
 const clients = new Map();
+const MEMBER_TTL_MS = 1000 * 60 * 60 * 24;
+const EMPTY_ROOM_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 function sendJson(res, status, data) {
   res.writeHead(status, {
@@ -38,10 +40,22 @@ function getRoom(id) {
   return rooms.get(id);
 }
 
+function roomKeyFrom(url, req) {
+  return url.searchParams.get("key") || req.headers["x-room-key"] || "";
+}
+
+function authorized(room, url, req) {
+  const stored = Buffer.from(String(room.key || ""));
+  const provided = Buffer.from(String(roomKeyFrom(url, req)));
+  return stored.length === provided.length && crypto.timingSafeEqual(stored, provided);
+}
+
 function createRoom(name) {
   const id = crypto.randomBytes(5).toString("hex");
+  const key = crypto.randomBytes(18).toString("base64url");
   const room = {
     id,
+    key,
     name: safeRoomName(name),
     createdAt: Date.now(),
     members: new Map()
@@ -105,7 +119,7 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       const data = body ? JSON.parse(body) : {};
       const room = createRoom(data.name);
-      sendJson(res, 201, { room: publicRoom(room) });
+      sendJson(res, 201, { room: publicRoom(room), key: room.key });
     });
     return;
   }
@@ -116,6 +130,10 @@ const server = http.createServer((req, res) => {
     const room = getRoom(roomId);
     if (!room) {
       sendJson(res, 404, { error: "Room not found" });
+      return;
+    }
+    if (!authorized(room, url, req)) {
+      sendJson(res, 403, { error: "Private invite key required" });
       return;
     }
 
@@ -150,6 +168,23 @@ const server = http.createServer((req, res) => {
         const data = body ? JSON.parse(body) : {};
         const id = String(data.id || crypto.randomUUID());
         const now = Date.now();
+        const existing = room.members.get(id);
+        const incomingLocation = data.location ? {
+          lat: Number(data.location.lat),
+          lng: Number(data.location.lng),
+          accuracy: Number(data.location.accuracy || 0),
+          speed: Number(data.location.speed || 0),
+          updatedAt: now,
+          live: data.liveSharing === true
+        } : null;
+        const hasValidLocation = Number.isFinite(incomingLocation?.lat) && Number.isFinite(incomingLocation?.lng);
+        const location = data.hideLocation === true
+          ? null
+          : hasValidLocation && data.consent === true
+            ? incomingLocation
+            : data.keepLastLocation === true && existing?.location
+              ? { ...existing.location, live: false }
+              : null;
         const member = {
           id,
           name: String(data.name || "Loved one").trim().slice(0, 40) || "Loved one",
@@ -158,17 +193,12 @@ const server = http.createServer((req, res) => {
           message: String(data.message || "").trim().slice(0, 120),
           battery: Number.isFinite(data.battery) ? Math.max(0, Math.min(100, data.battery)) : null,
           consent: data.consent === true,
+          liveSharing: data.liveSharing === true,
           lastSeen: now,
-          location: data.location && data.consent === true ? {
-            lat: Number(data.location.lat),
-            lng: Number(data.location.lng),
-            accuracy: Number(data.location.accuracy || 0),
-            speed: Number(data.location.speed || 0),
-            updatedAt: now
-          } : null
+          location
         };
 
-        if (!member.consent || !Number.isFinite(member.location?.lat) || !Number.isFinite(member.location?.lng)) {
+        if (member.location && (!Number.isFinite(member.location.lat) || !Number.isFinite(member.location.lng))) {
           member.location = null;
         }
 
@@ -184,12 +214,13 @@ const server = http.createServer((req, res) => {
 });
 
 setInterval(() => {
-  const cutoff = Date.now() - 1000 * 60 * 60 * 12;
+  const memberCutoff = Date.now() - MEMBER_TTL_MS;
+  const roomCutoff = Date.now() - EMPTY_ROOM_TTL_MS;
   for (const [roomId, room] of rooms.entries()) {
     for (const [memberId, member] of room.members.entries()) {
-      if (member.lastSeen < cutoff) room.members.delete(memberId);
+      if (member.lastSeen < memberCutoff) room.members.delete(memberId);
     }
-    if (room.createdAt < cutoff && room.members.size === 0) rooms.delete(roomId);
+    if (room.createdAt < roomCutoff && room.members.size === 0) rooms.delete(roomId);
   }
 }, 1000 * 60 * 15);
 
