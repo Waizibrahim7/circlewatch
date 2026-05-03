@@ -1,0 +1,13 @@
+{
+  "name": "circlewatch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Consent-based family location safety web app.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
